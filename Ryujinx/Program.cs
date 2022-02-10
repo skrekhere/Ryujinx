@@ -10,6 +10,7 @@ using Ryujinx.Configuration;
 using Ryujinx.Modules;
 using Ryujinx.Ui;
 using Ryujinx.Ui.Widgets;
+using Ryujinx.VR;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using System;
 using System.IO;
@@ -171,6 +172,8 @@ namespace Ryujinx
                     Logger.Error?.Print(LogClass.Application, $"Updater Error: {task.Exception}");
                 }, TaskContinuationOptions.OnlyOnFaulted);
             }
+
+            RyuXR.InitializeXR();
 
             Application.Run();
         }
