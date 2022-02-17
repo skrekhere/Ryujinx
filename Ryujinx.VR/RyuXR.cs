@@ -68,11 +68,11 @@ namespace Ryujinx.VR
             string maxVersion = ((UInt16)((glkhr.MaxApiVersionSupported >> 48) & 0xffffUL)) + "." + ((UInt16)((glkhr.MaxApiVersionSupported >> 32) & 0xffffUL)) + "." + ((UInt16)((glkhr.MaxApiVersionSupported >> 16) & 0xffffUL));
             Logger.Info?.Print(LogClass.VR, "OpenGL Version Min: " + minVersion + ", Max: " + maxVersion); // so much more code to write to also support vulkan pls merge soon so i can fetch and implement :((
 
-            object graphicsBinding;
+            GraphicsBinding graphicsBinding;
             
             if (OperatingSystem.IsWindows())
             {
-                graphicsBinding = new GraphicsBindingOpenGLWin32KHR(StructureType.TypeGraphicsBindingOpenglWin32Khr);y  
+                graphicsBinding = new GraphicsBindingOpenGLWin32KHR(StructureType.TypeGraphicsBindingOpenglWin32Khr);
 
             }else if (OperatingSystem.IsLinux())
             {
