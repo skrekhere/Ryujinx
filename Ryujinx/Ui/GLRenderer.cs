@@ -4,6 +4,7 @@ using OpenTK.Graphics.OpenGL;
 using Ryujinx.Common.Configuration;
 using Ryujinx.Graphics.OpenGL;
 using Ryujinx.Input.HLE;
+using Ryujinx.VR;
 using SPB.Graphics;
 using SPB.Graphics.OpenGL;
 using SPB.Platform;
@@ -48,6 +49,8 @@ namespace Ryujinx.Ui
             _openGLContext = PlatformHelper.CreateOpenGLContext(GetGraphicsMode(), 3, 3, _glLogLevel == GraphicsDebugLevel.None ? OpenGLContextFlags.Compat : OpenGLContextFlags.Compat | OpenGLContextFlags.Debug);
             _openGLContext.Initialize(_nativeWindow);
             _openGLContext.MakeCurrent(_nativeWindow);
+
+            RyuXR.InitializeXR(_openGLContext, _nativeWindow);
 
             // Release the GL exclusivity that SPB gave us as we aren't going to use it in GTK Thread.
             _openGLContext.MakeCurrent(null);

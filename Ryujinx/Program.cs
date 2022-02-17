@@ -173,8 +173,6 @@ namespace Ryujinx
                 }, TaskContinuationOptions.OnlyOnFaulted);
             }
 
-            RyuXR.InitializeXR();
-
             Application.Run();
         }
 

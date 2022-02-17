@@ -1,12 +1,9 @@
 ﻿using Silk.NET.OpenXR;
 using Ryujinx.Common.Logging;
 using Silk.NET.Core;
-using System.Drawing.Printing;
-using System.Reflection;
-using System.Reflection.Emit;
-using System.Reflection.Metadata.Ecma335;
+using SPB.Graphics.OpenGL;
+using SPB.Windowing;
 using System.Runtime.InteropServices;
-using System.Runtime.Versioning;
 using System.Text;
 
 
@@ -24,7 +21,7 @@ namespace Ryujinx.VR
 
 
 
-        public unsafe static bool InitializeXR()
+        public unsafe static bool InitializeXR(OpenGLContextBase context, SwappableNativeWindowBase window)
         {
             xr = XR.GetApi();
 
@@ -68,11 +65,15 @@ namespace Ryujinx.VR
             string maxVersion = ((UInt16)((glkhr.MaxApiVersionSupported >> 48) & 0xffffUL)) + "." + ((UInt16)((glkhr.MaxApiVersionSupported >> 32) & 0xffffUL)) + "." + ((UInt16)((glkhr.MaxApiVersionSupported >> 16) & 0xffffUL));
             Logger.Info?.Print(LogClass.VR, "OpenGL Version Min: " + minVersion + ", Max: " + maxVersion); // so much more code to write to also support vulkan pls merge soon so i can fetch and implement :((
 
-            GraphicsBinding graphicsBinding;
+            GraphicsBindingOpenGLXlibKHR graphicsBinding;
+            graphicsBinding.GlxContext = context.ContextHandle;
+            graphicsBinding.GlxDrawable = window.WindowHandle.RawHandle;
+            graphicsBinding.XDisplay = (nint*) window.DisplayHandle.RawHandle.ToPointer();
             
-            if (OperatingSystem.IsWindows())
+            /*if (OperatingSystem.IsWindows())
             {
                 graphicsBinding = new GraphicsBindingOpenGLWin32KHR(StructureType.TypeGraphicsBindingOpenglWin32Khr);
+                
 
             }else if (OperatingSystem.IsLinux())
             {
@@ -80,7 +81,7 @@ namespace Ryujinx.VR
 
             }else { // I dont have the capacity to test anything that isn't Windows or Linux, nor am i sure that any other options (FreeBSD, OSX, etc.) have any support at all for OpenXR. Someone should get on that.
                 throw new NotImplementedException("Your operating system is not supported by our OpenXR Implementation! Please open an issue on https://github.com/Ryujinx/Ryujinx with your operating system if one does not already exist!");
-            }
+            }*/
             
             SessionCreateInfo sessionCreateInfo = new SessionCreateInfo(StructureType.TypeSessionCreateInfo);
             sessionCreateInfo.Next = new IntPtr(&graphicsBinding).ToPointer();

@@ -130,7 +130,6 @@ namespace Ryujinx.Headless.SDL2.OpenGL
 
                 throw new Exception(errorMessage);
             }
-
             // NOTE: The window handle needs to be disposed by the thread that created it and is handled separately.
             _openGLContext = new SDL2OpenGLContext(context, WindowHandle, false);
 
