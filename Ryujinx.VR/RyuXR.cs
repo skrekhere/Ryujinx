@@ -1,7 +1,12 @@
 ﻿using Silk.NET.OpenXR;
 using Ryujinx.Common.Logging;
+using Silk.NET.Core;
+using System.Drawing.Printing;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Reflection.Metadata.Ecma335;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Text;
 
 
@@ -17,12 +22,12 @@ namespace Ryujinx.VR
 
         private static Instance instance;
 
-        
+
 
         public unsafe static bool InitializeXR()
         {
             xr = XR.GetApi();
-            
+
             CreateXRInstance();
 
             SystemGetInfo systemGetInfo = new SystemGetInfo(StructureType.TypeSystemGetInfo);
@@ -30,27 +35,62 @@ namespace Ryujinx.VR
             ulong systemID = 0;
             xr.GetSystem(instance, &systemGetInfo, &systemID);
 
+
             SystemProperties systemProperties = new SystemProperties(StructureType.TypeSystemProperties);
-            
+
             xr.GetSystemProperties(instance, systemID, &systemProperties);
             string systemName = "";
             for (int i = 0; i < XR.MaxSystemNameSize; i++)
             {
                 if (systemProperties.SystemName[i] == 0) break;
-                systemName += (char) systemProperties.SystemName[i];
+                systemName += (char)systemProperties.SystemName[i];
             }
-            Logger.Info?.Print(LogClass.VR, "System \"" + systemName + "\" has max layers " + systemProperties.GraphicsProperties.MaxLayerCount + " with max swapchain image size " + systemProperties.GraphicsProperties.MaxSwapchainImageWidth + "x" + systemProperties.GraphicsProperties.MaxSwapchainImageHeight);
-                
+
+            Logger.Info?.Print(LogClass.VR,
+                "System \"" + systemName + "\" has max layers " + systemProperties.GraphicsProperties.MaxLayerCount +
+                " with max swapchain image size " + systemProperties.GraphicsProperties.MaxSwapchainImageWidth + "x" +
+                systemProperties.GraphicsProperties.MaxSwapchainImageHeight);
+
+            //Switch only ever uses stereo in games. If it's unsupported, by the current runtime, throw an error for now.
+            List<ViewConfigurationView> views =
+                EnumerateAndReturnAvailableViewConfigViews(systemID, ViewConfigurationType.PrimaryStereo);
+            LogViewConfigurationViewInfo(views);
             
+            GraphicsRequirementsOpenGLKHR glkhr =
+                new GraphicsRequirementsOpenGLKHR(StructureType.TypeGraphicsRequirementsOpenglKhr);
+            PfnVoidFunction pfnVoidFunction = new PfnVoidFunction();
+            xr.GetInstanceProcAddr(instance, "xrGetOpenGLGraphicsRequirementsKHR", ref pfnVoidFunction);
+            Delegate xrGetOpenGLGraphicsRequirementsKHR =
+                Marshal.GetDelegateForFunctionPointer((IntPtr)pfnVoidFunction.Handle,
+                    typeof(Definitions.pfnGetOpenGLGraphicsRequirementsKHR));
+            xrGetOpenGLGraphicsRequirementsKHR.DynamicInvoke( instance, systemID, new IntPtr(&glkhr));
+            string minVersion = ((UInt16)((glkhr.MinApiVersionSupported >> 48) & 0xffffUL)) + "." + ((UInt16)((glkhr.MinApiVersionSupported >> 32) & 0xffffUL)) + "." + ((UInt16)((glkhr.MinApiVersionSupported >> 16) & 0xffffUL));
+            string maxVersion = ((UInt16)((glkhr.MaxApiVersionSupported >> 48) & 0xffffUL)) + "." + ((UInt16)((glkhr.MaxApiVersionSupported >> 32) & 0xffffUL)) + "." + ((UInt16)((glkhr.MaxApiVersionSupported >> 16) & 0xffffUL));
+            Logger.Info?.Print(LogClass.VR, "OpenGL Version Min: " + minVersion + ", Max: " + maxVersion); // so much more code to write to also support vulkan pls merge soon so i can fetch and implement :((
+
+            object graphicsBinding;
+            
+            if (OperatingSystem.IsWindows())
+            {
+                graphicsBinding = new GraphicsBindingOpenGLWin32KHR(StructureType.TypeGraphicsBindingOpenglWin32Khr);y  
+
+            }else if (OperatingSystem.IsLinux())
+            {
+                graphicsBinding = new GraphicsBindingOpenGLXlibKHR(StructureType.TypeGraphicsBindingOpenglXlibKhr);
+
+            }else { // I dont have the capacity to test anything that isn't Windows or Linux, nor am i sure that any other options (FreeBSD, OSX, etc.) have any support at all for OpenXR. Someone should get on that.
+                throw new NotImplementedException("Your operating system is not supported by our OpenXR Implementation! Please open an issue on https://github.com/Ryujinx/Ryujinx with your operating system if one does not already exist!");
+            }
             
             SessionCreateInfo sessionCreateInfo = new SessionCreateInfo(StructureType.TypeSessionCreateInfo);
+            sessionCreateInfo.Next = new IntPtr(&graphicsBinding).ToPointer();
             sessionCreateInfo.SystemId = systemID;
             Session session = new Session();
-            
-            
+
+
 
             xr.CreateSession(instance, &sessionCreateInfo, &session);
-            
+
             Logger.Info?.Print(LogClass.VR, "System ID: " + systemID);
 
             SessionBeginInfo sessionBeginInfo = new SessionBeginInfo(StructureType.TypeSessionBeginInfo);
@@ -140,6 +180,40 @@ namespace Ryujinx.VR
             }
         }
 
+        private static void LogViewConfigurationViewInfo(List<ViewConfigurationView> views)
+        {
+            for (int i = 0; i < views.Count; i++)
+            {
+                Logger.Info?.Print(LogClass.VR, "Resolution: ");
+                Logger.Info?.Print(LogClass.VR, "   Reccomended: " + views[i].RecommendedImageRectWidth + "x" + views[i].RecommendedImageRectHeight);
+                Logger.Info?.Print(LogClass.VR, "   Max: " + views[i].MaxImageRectWidth + "x" + views[i].MaxImageRectHeight);
+                Logger.Info?.Print(LogClass.VR, "Swapchain Samples: ");
+                Logger.Info?.Print(LogClass.VR, "   Reccomended: " + views[i].RecommendedSwapchainSampleCount);
+                Logger.Info?.Print(LogClass.VR, "   Max: " + views[i].MaxSwapchainSampleCount);
+            }
+        }
+
+        static unsafe List<ViewConfigurationView> EnumerateAndReturnAvailableViewConfigViews(ulong systemID, ViewConfigurationType viewType)
+        {
+            List<ViewConfigurationView> views = new List<ViewConfigurationView>();
+            uint viewCount = 0;
+            xr.EnumerateViewConfigurationView(instance, systemID, viewType, 0, &viewCount, null);
+            fixed (ViewConfigurationView* viewConfigViews = new ViewConfigurationView[viewCount])
+            {
+                for (int i = 0; i < viewCount; i++)
+                {
+                    viewConfigViews[i] = new ViewConfigurationView(StructureType.TypeViewConfigurationView);
+                }
+
+                xr.EnumerateViewConfigurationView(instance, systemID, viewType, viewCount, ref viewCount, viewConfigViews);
+                for (int i = 0; i < viewCount; i++)
+                {
+                    views.Add(viewConfigViews[i]);
+                }
+            }
+            return views;
+        }
+        
         static unsafe List<string> EnumerateAndReturnAvailableInstanceExtensions()
         {
             uint propertyNum = 0;
@@ -151,7 +225,7 @@ namespace Ryujinx.VR
                 {
                     properties[i] = new ExtensionProperties(StructureType.TypeExtensionProperties);
                 }
-                Result result = xr.EnumerateInstanceExtensionProperties((byte*)null, propertyNum, ref propertyNum, properties);
+                xr.EnumerateInstanceExtensionProperties((byte*)null, propertyNum, ref propertyNum, properties);
                 for (int i = 0; i < propertyNum; i++)
                 {
                     string propertyName = "";
