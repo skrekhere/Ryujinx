@@ -12,6 +12,7 @@ using Ryujinx.Input;
 using Ryujinx.Input.GTK3;
 using Ryujinx.Input.HLE;
 using Ryujinx.Ui.Widgets;
+using Ryujinx.VR;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Png;
 using SixLabors.ImageSharp.PixelFormats;
@@ -632,6 +633,8 @@ namespace Ryujinx.Ui
 
             Device.Hid.DebugPad.Update();
 
+            RyuXR.Frame();
+            
             return true;
         }
 

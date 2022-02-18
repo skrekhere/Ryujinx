@@ -17,7 +17,7 @@ namespace Ryujinx.VR
         private const string APP_NAME = "Ryujinx";
         private const string ENG_NAME = "Custom";
 
-        private static Instance instance;
+        public static XRContext ctx;
 
 
 
@@ -30,12 +30,12 @@ namespace Ryujinx.VR
             SystemGetInfo systemGetInfo = new SystemGetInfo(StructureType.TypeSystemGetInfo);
             systemGetInfo.FormFactor = FormFactor.HeadMountedDisplay;
             ulong systemID = 0;
-            xr.GetSystem(instance, &systemGetInfo, &systemID);
+            xr.GetSystem(ctx.instance, &systemGetInfo, &systemID);
 
 
             SystemProperties systemProperties = new SystemProperties(StructureType.TypeSystemProperties);
 
-            xr.GetSystemProperties(instance, systemID, &systemProperties);
+            xr.GetSystemProperties(ctx.instance, systemID, &systemProperties);
             string systemName = "";
             for (int i = 0; i < XR.MaxSystemNameSize; i++)
             {
@@ -49,77 +49,124 @@ namespace Ryujinx.VR
                 systemProperties.GraphicsProperties.MaxSwapchainImageHeight);
 
             //Switch only ever uses stereo in games. If it's unsupported, by the current runtime, throw an error for now.
-            List<ViewConfigurationView> views =
+            ctx.views =
                 EnumerateAndReturnAvailableViewConfigViews(systemID, ViewConfigurationType.PrimaryStereo);
-            LogViewConfigurationViewInfo(views);
-            
+            LogViewConfigurationViewInfo(ctx.views);
+
             GraphicsRequirementsOpenGLKHR glkhr =
                 new GraphicsRequirementsOpenGLKHR(StructureType.TypeGraphicsRequirementsOpenglKhr);
             PfnVoidFunction pfnVoidFunction = new PfnVoidFunction();
-            xr.GetInstanceProcAddr(instance, "xrGetOpenGLGraphicsRequirementsKHR", ref pfnVoidFunction);
+            xr.GetInstanceProcAddr(ctx.instance, "xrGetOpenGLGraphicsRequirementsKHR", ref pfnVoidFunction);
             Delegate xrGetOpenGLGraphicsRequirementsKHR =
                 Marshal.GetDelegateForFunctionPointer((IntPtr)pfnVoidFunction.Handle,
                     typeof(Definitions.pfnGetOpenGLGraphicsRequirementsKHR));
-            xrGetOpenGLGraphicsRequirementsKHR.DynamicInvoke( instance, systemID, new IntPtr(&glkhr));
-            string minVersion = ((UInt16)((glkhr.MinApiVersionSupported >> 48) & 0xffffUL)) + "." + ((UInt16)((glkhr.MinApiVersionSupported >> 32) & 0xffffUL)) + "." + ((UInt16)((glkhr.MinApiVersionSupported >> 16) & 0xffffUL));
-            string maxVersion = ((UInt16)((glkhr.MaxApiVersionSupported >> 48) & 0xffffUL)) + "." + ((UInt16)((glkhr.MaxApiVersionSupported >> 32) & 0xffffUL)) + "." + ((UInt16)((glkhr.MaxApiVersionSupported >> 16) & 0xffffUL));
-            Logger.Info?.Print(LogClass.VR, "OpenGL Version Min: " + minVersion + ", Max: " + maxVersion); // so much more code to write to also support vulkan pls merge soon so i can fetch and implement :((
+            xrGetOpenGLGraphicsRequirementsKHR.DynamicInvoke(ctx.instance, systemID, new IntPtr(&glkhr));
+            string minVersion = ((UInt16)((glkhr.MinApiVersionSupported >> 48) & 0xffffUL)) + "." +
+                                ((UInt16)((glkhr.MinApiVersionSupported >> 32) & 0xffffUL)) + "." +
+                                ((UInt16)((glkhr.MinApiVersionSupported >> 16) & 0xffffUL));
+            string maxVersion = ((UInt16)((glkhr.MaxApiVersionSupported >> 48) & 0xffffUL)) + "." +
+                                ((UInt16)((glkhr.MaxApiVersionSupported >> 32) & 0xffffUL)) + "." +
+                                ((UInt16)((glkhr.MaxApiVersionSupported >> 16) & 0xffffUL));
+            Logger.Info?.Print(LogClass.VR,
+                "OpenGL Version Min: " + minVersion + ", Max: " +
+                maxVersion); // so much more code to write to also support vulkan pls merge soon so i can fetch and implement :((
 
             GraphicsBinding graphicsBinding;
-            
+
             if (OperatingSystem.IsWindows())
             {
                 graphicsBinding = new GraphicsBindingOpenGLWin32KHR(StructureType.TypeGraphicsBindingOpenglWin32Khr)
                 {
-                    HGlrc = context.ContextHandle,
-                    HDC = window.DisplayHandle.RawHandle
+                    HGlrc = context.ContextHandle, HDC = window.DisplayHandle.RawHandle
                 };
-            }else if (OperatingSystem.IsLinux())
+            }
+            else if (OperatingSystem.IsLinux())
             {
                 graphicsBinding = new GraphicsBindingOpenGLXlibKHR(StructureType.TypeGraphicsBindingOpenglXlibKhr)
                 {
                     GlxContext = context.ContextHandle,
                     GlxDrawable = window.WindowHandle.RawHandle,
-                    XDisplay = (nint*) window.DisplayHandle.RawHandle.ToPointer()
+                    XDisplay = (nint*)window.DisplayHandle.RawHandle.ToPointer()
                 };
 
-            }else { // I dont have the capacity to test anything that isn't Windows or Linux, nor am i sure that any other options (FreeBSD, OSX, etc.) have any support at all for OpenXR. Someone should get on that.
-                throw new NotImplementedException("Your operating system is not supported by our OpenXR Implementation! Please open an issue on https://github.com/Ryujinx/Ryujinx with your operating system if one does not already exist!");
             }
-            
+            else
+            {
+                // I dont have the capacity to test anything that isn't Windows or Linux, nor am i sure that any other options (FreeBSD, OSX, etc.) have any support at all for OpenXR. Someone should get on that.
+                throw new NotImplementedException(
+                    "Your operating system is not supported by our OpenXR Implementation! Please open an issue on https://github.com/Ryujinx/Ryujinx with your operating system if one does not already exist!");
+            }
+
             SessionCreateInfo sessionCreateInfo = new SessionCreateInfo(StructureType.TypeSessionCreateInfo);
             sessionCreateInfo.Next = new IntPtr(&graphicsBinding).ToPointer();
             sessionCreateInfo.SystemId = systemID;
-            Session session = new Session();
+            ctx.session = new Session();
 
+            xr.CreateSession(ctx.instance, &sessionCreateInfo, ref ctx.session);
 
-
-            xr.CreateSession(instance, &sessionCreateInfo, &session);
-
+            ReferenceSpaceCreateInfo referenceSpaceCreateInfo =
+                new ReferenceSpaceCreateInfo(StructureType.TypeReferenceSpaceCreateInfo)
+                {
+                    Next = null,
+                    PoseInReferenceSpace = new Posef(new Quaternionf(0f, 0f, 0f, 1f), new Vector3f(0f, 0f, 0f)),
+                    ReferenceSpaceType = ReferenceSpaceType.Local
+                };
+            ctx.space = new Space();
+            xr.CreateReferenceSpace(ctx.session, referenceSpaceCreateInfo, ref ctx.space);
             Logger.Info?.Print(LogClass.VR, "System ID: " + systemID);
 
-            SessionBeginInfo sessionBeginInfo = new SessionBeginInfo(StructureType.TypeSessionBeginInfo);
-            
-            xr.BeginSession(session, &sessionBeginInfo);
+            SessionBeginInfo sessionBeginInfo = new SessionBeginInfo(StructureType.TypeSessionBeginInfo)
+            {
+                Next = null, PrimaryViewConfigurationType = ViewConfigurationType.PrimaryStereo
+            };
+            xr.BeginSession(ctx.session, sessionBeginInfo);
 
-            FrameWaitInfo frameWaitInfo = new FrameWaitInfo(StructureType.TypeFrameWaitInfo);
+            uint swapchainFormatCount = 0;
+            xr.EnumerateSwapchainFormats(ctx.session, 0, ref swapchainFormatCount, null);
+            long[] formats = new long[swapchainFormatCount];
 
-            FrameState frameState = new FrameState(StructureType.TypeFrameState);
+            fixed (long* formatFirst = formats)
+                xr.EnumerateSwapchainFormats(ctx.session, swapchainFormatCount, ref swapchainFormatCount, formatFirst);
 
-            xr.WaitFrame(session, &frameWaitInfo, &frameState);
+            ctx.swapchains = new List<Swapchain>();
+            ctx.images = new List<SwapchainImageBaseHeader>();
 
-            FrameBeginInfo frameBeginInfo = new FrameBeginInfo(StructureType.TypeFrameBeginInfo);
+            for (int i = 0; i < ctx.views.Count; i++)
+            {
+                Swapchain swapchain = new Swapchain();
+                SwapchainCreateInfo swapchainCreateInfo =
+                    new SwapchainCreateInfo(StructureType.TypeSwapchainCreateInfo)
+                    {
+                        UsageFlags =
+                            SwapchainUsageFlags.SwapchainUsageSampledBit |
+                            SwapchainUsageFlags.SwapchainUsageColorAttachmentBit,
+                        CreateFlags = 0,
+                        ArraySize = 1,
+                        FaceCount = 1,
+                        Format = formats[0],
+                        Height = ctx.views[i].RecommendedImageRectHeight,
+                        Width = ctx.views[i].RecommendedImageRectWidth,
+                        SampleCount = ctx.views[i].RecommendedSwapchainSampleCount,
+                        MipCount = 0,
+                        Next = null,
+                    };
+                xr.CreateSwapchain(ctx.session, &swapchainCreateInfo, &swapchain);
+                ctx.swapchains.Add(swapchain);
 
-            xr.BeginFrame(session, &frameBeginInfo);
+                uint swapchainLength = 0;
+                xr.EnumerateSwapchainImages(ctx.swapchains[i], 0, ref swapchainLength, null);
 
-            //xr.CreateSwapchain();
+                Logger.Info?.Print(LogClass.VR, "Swapchain length for view " + i + " is " + swapchainLength);
 
-            //xr.AcquireSwapchainImage();
-            
+                SwapchainImageBaseHeader swapchainImageBaseHeader =
+                    new SwapchainImageBaseHeader(StructureType.TypeSwapchainImageOpenglKhr);
+                xr.EnumerateSwapchainImages(ctx.swapchains[i], swapchainLength, ref swapchainLength,
+                    ref swapchainImageBaseHeader);
+                uint* pointer = (uint*) &swapchainImageBaseHeader;
+                SwapchainImageOpenGLKHR openGlImage = *((SwapchainImageOpenGLKHR*)pointer); //this is so hacky but it works LMFAO
+                ctx.images.Add(openGlImage);
 
-            FrameEndInfo frameEndInfo = new FrameEndInfo(StructureType.TypeFrameEndInfo);
-
-            xr.EndFrame(session, &frameEndInfo);
+            }
 
             return true;
         }
@@ -179,8 +226,8 @@ namespace Ryujinx.VR
                     instanceCreateInfo.ApplicationInfo = appInfo;
                     instanceCreateInfo.EnabledExtensionCount = 1;
                     instanceCreateInfo.EnabledExtensionNames = req;
-                    instance = new Instance();
-                    xr.CreateInstance(instanceCreateInfo, ref instance);
+                    ctx.instance = new Instance();
+                    xr.CreateInstance(instanceCreateInfo, ref ctx.instance);
                 }
             }
         }
@@ -202,7 +249,7 @@ namespace Ryujinx.VR
         {
             List<ViewConfigurationView> views = new List<ViewConfigurationView>();
             uint viewCount = 0;
-            xr.EnumerateViewConfigurationView(instance, systemID, viewType, 0, &viewCount, null);
+            xr.EnumerateViewConfigurationView(ctx.instance, systemID, viewType, 0, &viewCount, null);
             fixed (ViewConfigurationView* viewConfigViews = new ViewConfigurationView[viewCount])
             {
                 for (int i = 0; i < viewCount; i++)
@@ -210,7 +257,7 @@ namespace Ryujinx.VR
                     viewConfigViews[i] = new ViewConfigurationView(StructureType.TypeViewConfigurationView);
                 }
 
-                xr.EnumerateViewConfigurationView(instance, systemID, viewType, viewCount, ref viewCount, viewConfigViews);
+                xr.EnumerateViewConfigurationView(ctx.instance, systemID, viewType, viewCount, ref viewCount, viewConfigViews);
                 for (int i = 0; i < viewCount; i++)
                 {
                     views.Add(viewConfigViews[i]);
@@ -244,6 +291,102 @@ namespace Ryujinx.VR
             }
 
             return extensions;
+        }
+
+        public static unsafe bool Frame()
+        {
+            uint viewCount = (uint) ctx.views.Count;
+
+            
+            FrameState frameState = new FrameState(StructureType.TypeFrameState);
+            FrameWaitInfo frameWaitInfo = new FrameWaitInfo(StructureType.TypeFrameWaitInfo);
+            xr.WaitFrame(ctx.session, frameWaitInfo, ref frameState);
+            
+            //some action code would go here, not working on that yet though.
+
+            FrameBeginInfo frameBeginInfo = new FrameBeginInfo(StructureType.TypeFrameBeginInfo);
+            xr.BeginFrame(ctx.session, frameBeginInfo);
+
+            for (int i = 0; i < viewCount; i++)
+            {
+                SwapchainImageAcquireInfo swapchainImageAcquireInfo =
+                    new SwapchainImageAcquireInfo(StructureType.TypeSwapchainImageAcquireInfo);
+                uint acquiredIndex = 0;
+                xr.AcquireSwapchainImage(ctx.swapchains[i], swapchainImageAcquireInfo, ref acquiredIndex);
+
+                (ctx.images[i]).Image;
+                
+                
+                Logger.Info?.Print(LogClass.VR, "There should be an image right here");
+
+                SwapchainImageReleaseInfo swapchainImageReleaseInfo =
+                    new SwapchainImageReleaseInfo(StructureType.TypeSwapchainImageReleaseInfo);
+                xr.ReleaseSwapchainImage(ctx.swapchains[i], swapchainImageReleaseInfo);
+
+            }
+
+            View[] views = new View[viewCount];
+            for (int i = 0; i < viewCount; i++)
+            {
+                views[i] = new View(StructureType.TypeView);
+            }
+
+            ViewState viewState = new ViewState(StructureType.TypeViewState);
+            ViewLocateInfo viewLocateInfo = new ViewLocateInfo(StructureType.TypeViewLocateInfo)
+            {
+                DisplayTime = frameState.PredictedDisplayTime,
+                Space = ctx.space,
+                ViewConfigurationType = ViewConfigurationType.PrimaryStereo
+            };
+            xr.LocateView(ctx.session, viewLocateInfo, ref viewState, &viewCount, views);
+            List < CompositionLayerProjectionView> layerProjectionViews = new List<CompositionLayerProjectionView>();
+            for (int i = 0; i < viewCount; i++)
+            {
+                layerProjectionViews.Add(new CompositionLayerProjectionView(StructureType.TypeCompositionLayerProjectionView)
+                {
+                    Fov = views[i].Fov,
+                    Pose = views[i].Pose,
+                    SubImage = new SwapchainSubImage()
+                    {
+                        Swapchain = ctx.swapchains[i],
+                        ImageArrayIndex = 0,
+                        ImageRect = new Rect2Di()
+                        {
+                            Offset = new Offset2Di(0, 0),
+                            Extent = new Extent2Di((int)ctx.views[i].RecommendedImageRectWidth, (int)ctx.views[i].RecommendedImageRectHeight)
+                        }
+                    }
+                });
+            }
+
+            CompositionLayerProjectionView[] compositionLayerProjectionViews = layerProjectionViews.ToArray();
+            CompositionLayerProjection compositionLayerProjection;
+            fixed(CompositionLayerProjectionView* first = compositionLayerProjectionViews){
+                compositionLayerProjection =
+                    new CompositionLayerProjection(StructureType.TypeCompositionLayerProjection)
+                    {
+                        LayerFlags = 0, 
+                        Space = ctx.space, 
+                        Views = first, 
+                        ViewCount = (uint)compositionLayerProjectionViews.Length
+                    };
+            }
+
+
+            CompositionLayerBaseHeader*[] compositionLayerBaseHeaders = new[] {(CompositionLayerBaseHeader* )&compositionLayerProjection};
+            FrameEndInfo frameEndInfo;
+            fixed(CompositionLayerBaseHeader** first = compositionLayerBaseHeaders){
+                frameEndInfo = new FrameEndInfo(StructureType.TypeFrameEndInfo)
+                {
+                    DisplayTime = frameState.PredictedDisplayTime,
+                    EnvironmentBlendMode = EnvironmentBlendMode.Opaque,
+                    Layers = first,
+                    LayerCount = 1
+                };
+            }
+            xr.EndFrame(ctx.session, frameEndInfo);
+            
+            return true;
         }
     }
 }
