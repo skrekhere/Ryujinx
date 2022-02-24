@@ -16,6 +16,7 @@
         <PackageReference Include="Silk.NET.OpenXR.Extensions.KHR" Version="2.13.0" />
         <PackageReference Include="Silk.NET.OpenXR.Extensions.EXT" Version="2.13.0" />
         <PackageReference Include="SPB" Version="0.0.4-build17" />
+        <PackageReference Include="OpenTK.Graphics" Version="4.5.0" />
     </ItemGroup>
 
 </Project>

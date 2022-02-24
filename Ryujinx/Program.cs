@@ -216,6 +216,8 @@ namespace Ryujinx
 
         public static void Exit()
         {
+            RyuXR.Cleanup();
+            
             DiscordIntegrationModule.Exit();
 
             Ptc.Dispose();

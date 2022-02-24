@@ -1,4 +1,5 @@
-﻿using Silk.NET.OpenXR;
+﻿using OpenTK.Graphics.OpenGL;
+using Silk.NET.OpenXR;
 using Ryujinx.Common.Logging;
 using Silk.NET.Core;
 using SPB.Graphics.OpenGL;
@@ -129,7 +130,7 @@ namespace Ryujinx.VR
                 xr.EnumerateSwapchainFormats(ctx.session, swapchainFormatCount, ref swapchainFormatCount, formatFirst);
 
             ctx.swapchains = new List<Swapchain>();
-            ctx.images = new List<SwapchainImageBaseHeader>();
+            ctx.images = new SwapchainImageOpenGLKHR[ctx.views.Count][];
 
             for (int i = 0; i < ctx.views.Count; i++)
             {
@@ -155,17 +156,34 @@ namespace Ryujinx.VR
 
                 uint swapchainLength = 0;
                 xr.EnumerateSwapchainImages(ctx.swapchains[i], 0, ref swapchainLength, null);
-
+                
                 Logger.Info?.Print(LogClass.VR, "Swapchain length for view " + i + " is " + swapchainLength);
 
-                SwapchainImageBaseHeader swapchainImageBaseHeader =
-                    new SwapchainImageBaseHeader(StructureType.TypeSwapchainImageOpenglKhr);
-                xr.EnumerateSwapchainImages(ctx.swapchains[i], swapchainLength, ref swapchainLength,
-                    ref swapchainImageBaseHeader);
-                uint* pointer = (uint*) &swapchainImageBaseHeader;
-                SwapchainImageOpenGLKHR openGlImage = *((SwapchainImageOpenGLKHR*)pointer); //this is so hacky but it works LMFAO
-                ctx.images.Add(openGlImage);
+                SwapchainImageBaseHeader[] swapchainImageBaseHeaders = new SwapchainImageBaseHeader[swapchainLength];
+                for (int j = 0; j < swapchainImageBaseHeaders.Length; j++)
+                {
+                    swapchainImageBaseHeaders[i] =
+                        new SwapchainImageBaseHeader(StructureType.TypeSwapchainImageOpenglKhr);
+                }
 
+                fixed (SwapchainImageBaseHeader* first = swapchainImageBaseHeaders)
+                {
+                    xr.EnumerateSwapchainImages(ctx.swapchains[i], swapchainLength, ref swapchainLength,
+                        first);
+                    ctx.images[i] = new SwapchainImageOpenGLKHR[swapchainLength];
+                    for (int j = 0; j < swapchainLength; j++)
+                    {
+                        
+                        ctx.images[i][j] = ((SwapchainImageOpenGLKHR*) first)[j];
+                    }
+                }
+
+            }
+            ctx.framebuffers = new uint[ctx.views.Count][];
+            for (int i = 0; i < ctx.views.Count; i++)
+            {
+                ctx.framebuffers[i] = new uint[ctx.images[i].Length];
+                GL.GenFramebuffers(ctx.framebuffers[i].Length, ctx.framebuffers[i]);
             }
 
             return true;
@@ -236,12 +254,13 @@ namespace Ryujinx.VR
         {
             for (int i = 0; i < views.Count; i++)
             {
-                Logger.Info?.Print(LogClass.VR, "Resolution: ");
-                Logger.Info?.Print(LogClass.VR, "   Reccomended: " + views[i].RecommendedImageRectWidth + "x" + views[i].RecommendedImageRectHeight);
-                Logger.Info?.Print(LogClass.VR, "   Max: " + views[i].MaxImageRectWidth + "x" + views[i].MaxImageRectHeight);
-                Logger.Info?.Print(LogClass.VR, "Swapchain Samples: ");
-                Logger.Info?.Print(LogClass.VR, "   Reccomended: " + views[i].RecommendedSwapchainSampleCount);
-                Logger.Info?.Print(LogClass.VR, "   Max: " + views[i].MaxSwapchainSampleCount);
+                Logger.Info?.Print(LogClass.VR, "View Index: " + i);
+                Logger.Info?.Print(LogClass.VR, "   Resolution: ");
+                Logger.Info?.Print(LogClass.VR, "       Reccomended: " + views[i].RecommendedImageRectWidth + "x" + views[i].RecommendedImageRectHeight);
+                Logger.Info?.Print(LogClass.VR, "       Max: " + views[i].MaxImageRectWidth + "x" + views[i].MaxImageRectHeight);
+                Logger.Info?.Print(LogClass.VR, "   Swapchain Samples: ");
+                Logger.Info?.Print(LogClass.VR, "       Reccomended: " + views[i].RecommendedSwapchainSampleCount);
+                Logger.Info?.Print(LogClass.VR, "       Max: " + views[i].MaxSwapchainSampleCount);
             }
         }
 
@@ -296,11 +315,35 @@ namespace Ryujinx.VR
         public static unsafe bool Frame()
         {
             uint viewCount = (uint) ctx.views.Count;
+            EventDataBuffer current = new EventDataBuffer(StructureType.TypeEventDataBuffer);
+            Result pollResult = xr.PollEvent(ctx.instance, &current);
+
+            while (pollResult == Result.Success)
+            {
+                switch (current.Type)
+                {
+                    case StructureType.TypeEventDataEventsLost:
+                        EventDataEventsLost* ev = (EventDataEventsLost*) &current; 
+                        Logger.Warning?.Print(LogClass.VR, ev->LostEventCount + " events' data lost!");
+                        break;
+                    default:
+                        Logger.Info?.Print(LogClass.VR, "Unhandled event: " + current.Type);
+                        break;
+                }
+
+                current.Type = StructureType.TypeEventDataBuffer;
+                pollResult = xr.PollEvent(ctx.instance, &current);
+            }
 
             
             FrameState frameState = new FrameState(StructureType.TypeFrameState);
             FrameWaitInfo frameWaitInfo = new FrameWaitInfo(StructureType.TypeFrameWaitInfo);
             xr.WaitFrame(ctx.session, frameWaitInfo, ref frameState);
+
+            if (frameState.ShouldRender == 0)
+            {
+                return true;
+            }
             
             //some action code would go here, not working on that yet though.
 
@@ -314,11 +357,15 @@ namespace Ryujinx.VR
                 uint acquiredIndex = 0;
                 xr.AcquireSwapchainImage(ctx.swapchains[i], swapchainImageAcquireInfo, ref acquiredIndex);
 
-                (ctx.images[i]).Image;
+                xr.WaitSwapchainImage(ctx.swapchains[i], new SwapchainImageWaitInfo(StructureType.TypeSwapchainImageWaitInfo){Timeout = 1000});
                 
+                GL.BindFramebuffer(FramebufferTarget.Framebuffer, ctx.framebuffers[i][acquiredIndex]);
                 
-                Logger.Info?.Print(LogClass.VR, "There should be an image right here");
-
+                GL.Viewport(0, 0, (int)ctx.views[i].RecommendedImageRectWidth, (int)ctx.views[i].RecommendedImageRectHeight);
+                GL.Scissor(0, 0, (int)ctx.views[i].RecommendedImageRectWidth, (int)ctx.views[i].RecommendedImageRectHeight);
+                
+                GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment0, TextureTarget.Texture2D, ctx.images[i][acquiredIndex].Image, 0);
+                
                 SwapchainImageReleaseInfo swapchainImageReleaseInfo =
                     new SwapchainImageReleaseInfo(StructureType.TypeSwapchainImageReleaseInfo);
                 xr.ReleaseSwapchainImage(ctx.swapchains[i], swapchainImageReleaseInfo);
@@ -373,7 +420,7 @@ namespace Ryujinx.VR
             }
 
 
-            CompositionLayerBaseHeader*[] compositionLayerBaseHeaders = new[] {(CompositionLayerBaseHeader* )&compositionLayerProjection};
+            CompositionLayerBaseHeader*[] compositionLayerBaseHeaders = new[] {(CompositionLayerBaseHeader*)&compositionLayerProjection};
             FrameEndInfo frameEndInfo;
             fixed(CompositionLayerBaseHeader** first = compositionLayerBaseHeaders){
                 frameEndInfo = new FrameEndInfo(StructureType.TypeFrameEndInfo)
@@ -387,6 +434,28 @@ namespace Ryujinx.VR
             xr.EndFrame(ctx.session, frameEndInfo);
             
             return true;
+        }
+
+        public static void Cleanup()
+        {
+
+            xr.EndSession(ctx.session);
+            
+            foreach (Swapchain t in ctx.swapchains)
+            {
+                xr.DestroySwapchain(t);
+            }
+
+            xr.DestroySpace(ctx.space);
+
+            xr.DestroySession(ctx.session);
+
+            foreach(uint[] t in ctx.framebuffers)
+            {
+                GL.DeleteFramebuffers(t.Length, t);
+            }
+
+            xr.DestroyInstance(ctx.instance);
         }
     }
 }

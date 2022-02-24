@@ -14,5 +14,7 @@ public struct XRContext
     public Space space;
 
     public List<Swapchain> swapchains;
-    public List<SwapchainImageOpenGLKHR> images; //for now- making it exclusive to OpenGL. makes testing easier. this will be compatible with vulkan too i promise :)
+    public SwapchainImageOpenGLKHR[][] images; //for now- making it exclusive to OpenGL. makes testing easier. this will be compatible with vulkan too i promise :)
+
+    public uint[][] framebuffers;
 }

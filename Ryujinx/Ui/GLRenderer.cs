@@ -50,14 +50,14 @@ namespace Ryujinx.Ui
             _openGLContext.Initialize(_nativeWindow);
             _openGLContext.MakeCurrent(_nativeWindow);
 
-            RyuXR.InitializeXR(_openGLContext, _nativeWindow);
-
             // Release the GL exclusivity that SPB gave us as we aren't going to use it in GTK Thread.
             _openGLContext.MakeCurrent(null);
 
             WaitEvent.Set();
 
             _initializedOpenGL = true;
+            
+            RyuXR.InitializeXR(_openGLContext, _nativeWindow);
         }
 
         private SwappableNativeWindowBase RetrieveNativeWindow()

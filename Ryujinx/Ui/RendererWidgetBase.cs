@@ -632,8 +632,6 @@ namespace Ryujinx.Ui
             }
 
             Device.Hid.DebugPad.Update();
-
-            RyuXR.Frame();
             
             return true;
         }

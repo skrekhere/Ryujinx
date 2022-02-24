@@ -1,6 +1,7 @@
 using OpenTK.Graphics.OpenGL;
 using Ryujinx.Graphics.GAL;
 using Ryujinx.Graphics.OpenGL.Image;
+using Ryujinx.VR;
 using System;
 
 namespace Ryujinx.Graphics.OpenGL
@@ -36,13 +37,15 @@ namespace Ryujinx.Graphics.OpenGL
 
         public void SetSize(int width, int height)
         {
-            _width  = width;
+            _width = width;
             _height = height;
         }
 
-        private void CopyTextureToFrameBufferRGB(int drawFramebuffer, int readFramebuffer, TextureView view, ImageCrop crop)
+        private void CopyTextureToFrameBufferRGB(int drawFramebuffer, int readFramebuffer, TextureView view,
+            ImageCrop crop)
         {
-            (int oldDrawFramebufferHandle, int oldReadFramebufferHandle) = ((Pipeline)_renderer.Pipeline).GetBoundFramebuffers();
+            (int oldDrawFramebufferHandle, int oldReadFramebufferHandle) =
+                ((Pipeline)_renderer.Pipeline).GetBoundFramebuffers();
 
             GL.BindFramebuffer(FramebufferTarget.DrawFramebuffer, drawFramebuffer);
             GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, readFramebuffer);
@@ -54,6 +57,8 @@ namespace Ryujinx.Graphics.OpenGL
                 FramebufferAttachment.ColorAttachment0,
                 viewConverted.Handle,
                 0);
+
+            RyuXR.Frame();
 
             GL.ReadBuffer(ReadBufferMode.ColorAttachment0);
 
@@ -95,13 +100,17 @@ namespace Ryujinx.Graphics.OpenGL
                 srcY1 = (int)Math.Ceiling(srcY1 * scale);
             }
 
-            float ratioX = crop.IsStretched ? 1.0f : MathF.Min(1.0f, _height * crop.AspectRatioX / (_width  * crop.AspectRatioY));
-            float ratioY = crop.IsStretched ? 1.0f : MathF.Min(1.0f, _width  * crop.AspectRatioY / (_height * crop.AspectRatioX));
+            float ratioX = crop.IsStretched
+                ? 1.0f
+                : MathF.Min(1.0f, _height * crop.AspectRatioX / (_width * crop.AspectRatioY));
+            float ratioY = crop.IsStretched
+                ? 1.0f
+                : MathF.Min(1.0f, _width * crop.AspectRatioY / (_height * crop.AspectRatioX));
 
-            int dstWidth  = (int)(_width  * ratioX);
+            int dstWidth = (int)(_width * ratioX);
             int dstHeight = (int)(_height * ratioY);
 
-            int dstPaddingX = (_width  - dstWidth)  / 2;
+            int dstPaddingX = (_width - dstWidth) / 2;
             int dstPaddingY = (_height - dstHeight) / 2;
 
             int dstX0 = crop.FlipX ? _width - dstPaddingX : dstPaddingX;
@@ -175,7 +184,8 @@ namespace Ryujinx.Graphics.OpenGL
             long size = Math.Abs(4 * width * height);
             byte[] bitmap = new byte[size];
 
-            GL.ReadPixels(x, y, width, height, isBgra ? PixelFormat.Bgra : PixelFormat.Rgba, PixelType.UnsignedByte, bitmap);
+            GL.ReadPixels(x, y, width, height, isBgra ? PixelFormat.Bgra : PixelFormat.Rgba, PixelType.UnsignedByte,
+                bitmap);
 
             _renderer.OnScreenCaptured(new ScreenCaptureImageInfo(width, height, isBgra, bitmap, flipX, flipY));
         }
